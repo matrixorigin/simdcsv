@@ -1,4 +1,4 @@
-module github.com/minio/simdcsv
+module github.com/matrixorigin/simdcsv
 
 go 1.15
 
