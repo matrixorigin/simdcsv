@@ -28,6 +28,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 	"unicode"
 	"unicode/utf8"
 )
@@ -79,6 +80,15 @@ type Reader struct {
 	TrailingComma bool // Deprecated: No longer used.
 
 	r *bufio.Reader
+
+	//for debug
+	Begin                  time.Time
+	Stage1_first_chunk     time.Duration
+	Stage1_end time.Duration
+	Stage2_first_chunkinfo [5]time.Duration
+	Stage2_end [5]time.Duration
+	ReadLoop_first_records time.Duration
+	End                    time.Duration
 }
 
 var errInvalidDelim = errors.New("csv: invalid field or comment delimiter")
@@ -91,6 +101,20 @@ func validDelim(r rune) bool {
 func NewReader(r io.Reader) *Reader {
 	return &Reader{
 		Comma: ',',
+		r:     bufio.NewReader(r),
+	}
+}
+
+// NewReader returns a new Reader with options that reads from r.
+func NewReaderWithOptions(r io.Reader, cma, cmnt rune, lazyQt, tls bool) *Reader {
+	return &Reader{
+		Comma: cma,
+		Comment: cmnt,
+		FieldsPerRecord: -1,
+		LazyQuotes: lazyQt,
+		TrimLeadingSpace: tls,
+		ReuseRecord: false,
+		TrailingComma: false,
 		r:     bufio.NewReader(r),
 	}
 }
@@ -114,6 +138,11 @@ type recordsOutput struct {
 type chunkIn struct {
 	buf  []byte
 	last bool
+}
+
+type LineOut struct {
+	Lines [][]string
+	Line  []string
 }
 
 // readAllStreaming reads all the remaining records from r.
@@ -212,7 +241,7 @@ func (r *Reader) readAllStreaming() (out chan recordsOutput) {
 		fieldsPerRecord := int64(r.FieldsPerRecord)
 
 		for parallel := 0; parallel < cores; parallel++ {
-			go r.stage2Streaming(chunks, &wg, &fieldsPerRecord, fallback, out)
+			go r.stage2Streaming(chunks, &wg, &fieldsPerRecord, fallback, out, parallel)
 		}
 
 		wg.Wait()
@@ -231,8 +260,13 @@ func (r *Reader) stage1Streaming(bufchan chan chunkIn, chunkSize int, masksSize 
 
 	splitRow := make([]byte, 0, 256)
 
-	for chunk := range bufchan {
+	first := true
 
+	for chunk := range bufchan {
+		if first {
+			r.Stage1_first_chunk = time.Since(r.Begin)
+			first = false
+		}
 		postProcStream := make([]uint64, 0, ((chunkSize>>6)+1)*2)
 		masksStream := make([]uint64, masksSize)
 
@@ -281,15 +315,21 @@ func (r *Reader) stage1Streaming(bufchan chan chunkIn, chunkSize int, masksSize 
 
 		sequence++
 	}
+	r.Stage1_end = time.Since(r.Begin)
 }
 
-func (r *Reader) stage2Streaming(chunks chan chunkInfo, wg *sync.WaitGroup, fieldsPerRecord *int64, fallback func(ioReader io.Reader) recordsOutput, out chan recordsOutput) {
+func (r *Reader) stage2Streaming(chunks chan chunkInfo, wg *sync.WaitGroup, fieldsPerRecord *int64, fallback func(ioReader io.Reader) recordsOutput, out chan recordsOutput, id int) {
 	defer wg.Done()
 
 	simdlines, rowsSize, columnsSize := 1024, 500, 50000
 
-	for chunkInfo := range chunks {
+	first := true
 
+	for chunkInfo := range chunks {
+		if first {
+			r.Stage2_first_chunkinfo[id] = time.Since(r.Begin)
+			first = false
+		}
 		simdrecords := make([][]string, 0, simdlines)
 
 		rows := make([]uint64, rowsSize, rowsSize)
@@ -379,6 +419,7 @@ func (r *Reader) stage2Streaming(chunks chan chunkInfo, wg *sync.WaitGroup, fiel
 
 		out <- recordsOutput{chunkInfo.sequence, simdrecords, nil}
 	}
+	r.Stage2_end[id] = time.Since(r.Begin)
 }
 
 // ReadAll reads all the remaining records from r.
@@ -440,6 +481,92 @@ func (r *Reader) ReadAll() ([][]string, error) {
 	} else {
 		return records, nil
 	}
+}
+
+// ReadLoop reads all the remaining records from r.
+func (r *Reader) ReadLoop(lineOutChan chan LineOut) error {
+	r.Begin = time.Now()
+	if !SupportedCPU() {
+		rCsv := csv.NewReader(r.r)
+		rCsv.LazyQuotes = r.LazyQuotes
+		rCsv.TrimLeadingSpace = r.TrimLeadingSpace
+		rCsv.Comment = r.Comment
+		rCsv.Comma = r.Comma
+		rCsv.FieldsPerRecord = r.FieldsPerRecord
+		rCsv.ReuseRecord = r.ReuseRecord
+
+		//go csv reading loop
+		for {
+			record, err := rCsv.Read()
+			if err == io.EOF {
+				if lineOutChan != nil {
+					lineOutChan <- LineOut{nil, record}
+				}
+				return nil
+			}
+
+			if err != nil {
+				return err
+			}
+
+			if lineOutChan != nil {
+				lineOutChan <- LineOut{nil, record}
+			}
+		}
+
+		return nil
+	}
+
+	out := r.readAllStreaming()
+
+	hash := make(map[int][][]string)
+	sequence := 0
+
+	first := true
+	for rcrds := range out {
+		if first {
+			r.ReadLoop_first_records = time.Since(r.Begin)
+			first = false
+		}
+		if rcrds.err != nil {
+			// upon encountering an error ...
+			for _ = range out {
+				// ... drain channel
+			}
+			return rcrds.err
+		}
+
+		// check whether number is in sequence
+		if rcrds.sequence > sequence {
+			hash[rcrds.sequence] = rcrds.records
+			continue
+		}
+
+		if lineOutChan != nil {
+			lineOutChan <- LineOut{rcrds.records, nil}
+		}
+		sequence++
+
+		// check if we already received higher sequence numbers
+		for {
+			if val, ok := hash[sequence]; ok {
+				if lineOutChan != nil {
+					lineOutChan <- LineOut{val, nil}
+				}
+
+				delete(hash, sequence)
+				sequence++
+			} else {
+				break
+			}
+		}
+	}
+	if lineOutChan != nil {
+		lineOutChan <- LineOut{nil, nil}
+	}
+
+	r.End = time.Since(r.Begin)
+	return nil
 }
 
 func filterOutComments(records *[][]string, comment byte) {
