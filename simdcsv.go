@@ -543,7 +543,9 @@ func (r *Reader) ReadLoop(lineOutChan chan LineOut) error {
 		}
 
 		if lineOutChan != nil {
-			lineOutChan <- LineOut{rcrds.records, nil}
+			for _, record := range rcrds.records {
+				lineOutChan <- LineOut{nil, record}
+			}
 		}
 		sequence++
 
@@ -551,7 +553,9 @@ func (r *Reader) ReadLoop(lineOutChan chan LineOut) error {
 		for {
 			if val, ok := hash[sequence]; ok {
 				if lineOutChan != nil {
-					lineOutChan <- LineOut{val, nil}
+					for _, record := range val {
+						lineOutChan <- LineOut{nil, record}
+					}
 				}
 
 				delete(hash, sequence)
