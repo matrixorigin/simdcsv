@@ -81,6 +81,16 @@ type Reader struct {
 
 	r *bufio.Reader
 
+	//for close
+	onceCloseOut sync.Once
+	out chan recordsOutput
+
+	onceCloseBufChan sync.Once
+	bufchan chan chunkIn
+
+	onceCloseChunks sync.Once
+	chunks chan chunkInfo
+
 	//for debug
 	Begin                  time.Time
 	Stage1_first_chunk     time.Duration
@@ -147,8 +157,14 @@ type LineOut struct {
 
 // readAllStreaming reads all the remaining records from r.
 func (r *Reader) readAllStreaming() (out chan recordsOutput) {
-
+	defer func() {
+		if er := recover(); er != nil{
+			//fmt.Printf("%v\n",er)
+		}
+		//fmt.Printf("----- readAllStreaming exit in recover\n")
+	}()
 	out = make(chan recordsOutput, 20)
+	r.out = out
 
 	fallback := func(ioReader io.Reader) recordsOutput {
 		rCsv := csv.NewReader(ioReader)
@@ -165,7 +181,9 @@ func (r *Reader) readAllStreaming() (out chan recordsOutput) {
 	if r.Comma == r.Comment || !validDelim(r.Comma) || (r.Comment != 0 && !validDelim(r.Comment)) {
 		go func() {
 			out <- recordsOutput{-1, nil, errInvalidDelim}
-			close(out)
+			r.onceCloseOut.Do(func() {
+				close(out)
+			})
 		}()
 		return
 	}
@@ -175,7 +193,9 @@ func (r *Reader) readAllStreaming() (out chan recordsOutput) {
 		r.Comment != 0 && r.Comment > unicode.MaxLatin1 {
 		go func() {
 			out <- fallback(r.r)
-			close(out)
+			r.onceCloseOut.Do(func() {
+				close(out)
+			})
 		}()
 		return
 	}
@@ -188,10 +208,18 @@ func (r *Reader) readAllStreaming() (out chan recordsOutput) {
 
 	// channel with slices of input
 	bufchan := make(chan chunkIn, cap(out))
+	r.bufchan = bufchan
 
 	go func() {
-
-		defer close(bufchan)
+		defer func() {
+			if er := recover(); er != nil{
+				//fmt.Printf("%v\n",er)
+			}
+			//fmt.Printf("----- read file exit in recover\n")
+		}()
+		defer r.onceCloseBufChan.Do(func() {
+			close(r.bufchan)
+		})
 
 		br := bufio.NewReader(r.r)
 		chunk := make([]byte, chunkSize)
@@ -229,6 +257,7 @@ func (r *Reader) readAllStreaming() (out chan recordsOutput) {
 
 	// channel with preprocessed chunks
 	chunks := make(chan chunkInfo, cap(out))
+	r.chunks = chunks
 
 	go r.stage1Streaming(bufchan, chunkSize, masksSize, chunks)
 
@@ -245,15 +274,24 @@ func (r *Reader) readAllStreaming() (out chan recordsOutput) {
 		}
 
 		wg.Wait()
-		close(out)
+		r.onceCloseOut.Do(func() {
+			close(out)
+		})
 	}()
 
 	return
 }
 
 func (r *Reader) stage1Streaming(bufchan chan chunkIn, chunkSize int, masksSize int, chunks chan chunkInfo) {
-
-	defer close(chunks)
+	defer func() {
+		if er := recover(); er != nil{
+			//fmt.Printf("%v\n",er)
+		}
+		//fmt.Printf("----- stage1Streaming exit in recover\n")
+	}()
+	defer r.onceCloseChunks.Do(func() {
+		close(chunks)
+	})
 
 	sequence := 0
 	quoted := uint64(0) // initialized quoted state to unquoted
@@ -319,6 +357,12 @@ func (r *Reader) stage1Streaming(bufchan chan chunkIn, chunkSize int, masksSize 
 }
 
 func (r *Reader) stage2Streaming(chunks chan chunkInfo, wg *sync.WaitGroup, fieldsPerRecord *int64, fallback func(ioReader io.Reader) recordsOutput, out chan recordsOutput, id int) {
+	defer func() {
+		if er := recover(); er != nil{
+			//fmt.Printf("%v\n",er)
+		}
+		//fmt.Printf("----- stage2Streaming exit in recover\n")
+	}()
 	defer wg.Done()
 
 	simdlines, rowsSize, columnsSize := 1024, 500, 50000
@@ -485,6 +529,13 @@ func (r *Reader) ReadAll() ([][]string, error) {
 
 // ReadLoop reads all the remaining records from r.
 func (r *Reader) ReadLoop(lineOutChan chan LineOut) error {
+	defer func() {
+		if er := recover(); er != nil{
+			//fmt.Printf("%v\n",er)
+		}
+		//fmt.Printf("----- read loop exit in recover\n")
+	}()
+
 	r.Begin = time.Now()
 	if !SupportedCPU() {
 		rCsv := csv.NewReader(r.r)
@@ -571,6 +622,18 @@ func (r *Reader) ReadLoop(lineOutChan chan LineOut) error {
 
 	r.End = time.Since(r.Begin)
 	return nil
+}
+
+func (r *Reader) Close() {
+	r.onceCloseBufChan.Do(func() {
+		close(r.bufchan)
+	})
+	r.onceCloseChunks.Do(func() {
+		close(r.chunks)
+	})
+	r.onceCloseOut.Do(func() {
+		close(r.out)
+	})
 }
 
 func filterOutComments(records *[][]string, comment byte) {
