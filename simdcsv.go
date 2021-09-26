@@ -182,7 +182,10 @@ func (r *Reader) readAllStreaming() (out chan recordsOutput) {
 		go func() {
 			out <- recordsOutput{-1, nil, errInvalidDelim}
 			r.onceCloseOut.Do(func() {
-				close(out)
+				if out != nil {
+					close(out)
+					r.out = nil
+				}
 			})
 		}()
 		return
@@ -194,7 +197,10 @@ func (r *Reader) readAllStreaming() (out chan recordsOutput) {
 		go func() {
 			out <- fallback(r.r)
 			r.onceCloseOut.Do(func() {
-				close(out)
+				if out != nil {
+					close(out)
+					r.out = nil
+				}
 			})
 		}()
 		return
@@ -218,7 +224,10 @@ func (r *Reader) readAllStreaming() (out chan recordsOutput) {
 			//fmt.Printf("----- read file exit in recover\n")
 		}()
 		defer r.onceCloseBufChan.Do(func() {
-			close(r.bufchan)
+			if r.bufchan != nil {
+				close(r.bufchan)
+				r.bufchan = nil
+			}
 		})
 
 		br := bufio.NewReader(r.r)
@@ -275,7 +284,10 @@ func (r *Reader) readAllStreaming() (out chan recordsOutput) {
 
 		wg.Wait()
 		r.onceCloseOut.Do(func() {
-			close(out)
+			if out != nil {
+				close(out)
+				r.out = nil
+			}
 		})
 	}()
 
@@ -290,7 +302,10 @@ func (r *Reader) stage1Streaming(bufchan chan chunkIn, chunkSize int, masksSize 
 		//fmt.Printf("----- stage1Streaming exit in recover\n")
 	}()
 	defer r.onceCloseChunks.Do(func() {
-		close(chunks)
+		if chunks != nil {
+			close(chunks)
+			r.chunks = nil
+		}
 	})
 
 	sequence := 0
@@ -625,14 +640,29 @@ func (r *Reader) ReadLoop(lineOutChan chan LineOut) error {
 }
 
 func (r *Reader) Close() {
+	defer func() {
+		if er := recover(); er != nil{
+			//fmt.Printf("%v\n",er)
+		}
+		//fmt.Printf("----- Close exit in recover\n")
+	}()
 	r.onceCloseBufChan.Do(func() {
-		close(r.bufchan)
+		if r.bufchan != nil {
+			close(r.bufchan)
+			r.bufchan = nil
+		}
 	})
 	r.onceCloseChunks.Do(func() {
-		close(r.chunks)
+		if r.chunks != nil{
+			close(r.chunks)
+			r.chunks = nil
+		}
 	})
 	r.onceCloseOut.Do(func() {
-		close(r.out)
+		if r.out != nil {
+			close(r.out)
+			r.out = nil
+		}
 	})
 }
 
