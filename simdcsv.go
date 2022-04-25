@@ -543,10 +543,10 @@ func (r *Reader) ReadAll() ([][]string, error) {
 }
 
 // ReadLoop reads all the remaining records from r.
-func (r *Reader) ReadLoop(lineOutChan chan LineOut) error {
+func (r *Reader) ReadLoop(lineOutChan chan LineOut) (err error) {
 	defer func() {
 		if er := recover(); er != nil{
-			//fmt.Printf("%v\n",er)
+			err = fmt.Errorf("%v\n",er)
 		}
 		//fmt.Printf("----- read loop exit in recover\n")
 	}()
