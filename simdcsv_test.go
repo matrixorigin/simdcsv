@@ -18,6 +18,7 @@ package simdcsv
 
 import (
 	"bytes"
+	"context"
 	"encoding/csv"
 	"encoding/hex"
 	"fmt"
@@ -31,11 +32,9 @@ import (
 	"unicode/utf8"
 )
 
-//
 // Below are the test cases from `encoding/csv`.
 //
 // They are copied directly from https://golang.org/src/encoding/csv/reader_test.go
-//
 func TestRead(t *testing.T) {
 	tests := []struct {
 		Name   string
@@ -431,12 +430,14 @@ x,,,
 
 			out := [][]string{}
 			var err error
-			out, err = r.ReadAll()
+			out, err = r.ReadAll(context.TODO())
+			r.Close()
 			if !reflect.DeepEqual(err, tt.Error) {
 				t.Errorf("ReadAll() error:\ngot  %#v\nwant %#v", err, tt.Error)
 			} else if !reflect.DeepEqual(out, tt.Output) {
 				t.Errorf("ReadAll() output:\ngot  %q\nwant %q", out, tt.Output)
 			}
+
 		})
 	}
 }
@@ -558,7 +559,7 @@ func compareAgainstEncodingCsv(t *testing.T, test []byte, sep rune) {
 	}
 	r := NewReader(bytes.NewReader(test))
 	r.Comma = sep
-	simdrecords, err := r.ReadAll()
+	simdrecords, err := r.ReadAll(context.TODO())
 	if err != nil {
 		log.Fatalf("%v", err)
 	}
@@ -575,7 +576,7 @@ func testIgnoreCommentedLines(t *testing.T, csvData []byte) {
 
 	simdr := NewReader(bytes.NewReader(csvData))
 	simdr.FieldsPerRecord = -1
-	simdrecords, err := simdr.ReadAll()
+	simdrecords, err := simdr.ReadAll(context.TODO())
 	if err != nil {
 		log.Fatalf("%v", err)
 	}
@@ -612,7 +613,7 @@ func testFieldsPerRecord(t *testing.T, csvData []byte, fieldsPerRecord int64) {
 
 	simdr := NewReader(bytes.NewReader(csvData))
 	simdr.FieldsPerRecord = int(fieldsPerRecord)
-	simdrecords, errSimd := simdr.ReadAll()
+	simdrecords, errSimd := simdr.ReadAll(context.TODO())
 
 	r := csv.NewReader(bytes.NewReader(csvData))
 	r.FieldsPerRecord = int(fieldsPerRecord)
@@ -650,7 +651,7 @@ func TestEnsureFieldsPerRecord(t *testing.T) {
 func testTrimLeadingSpace(t *testing.T, csvData []byte) {
 
 	simdr := NewReader(bytes.NewReader(csvData))
-	simdrecords, err := simdr.ReadAll()
+	simdrecords, err := simdr.ReadAll(context.TODO())
 	if err != nil {
 		log.Fatalf("%v", err)
 	}
@@ -857,7 +858,7 @@ func benchmarkSimdCsv(b *testing.B, file string) {
 
 	for i := 0; i < b.N; i++ {
 		r := NewReader(bytes.NewReader(buf))
-		_, err := r.ReadAll()
+		_, err := r.ReadAll(context.TODO())
 		if err != nil {
 			log.Fatalf("%v", err)
 		}

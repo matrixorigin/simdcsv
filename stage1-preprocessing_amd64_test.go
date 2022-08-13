@@ -18,6 +18,7 @@ package simdcsv
 
 import (
 	"bytes"
+	"context"
 	"encoding/csv"
 	_ "encoding/hex"
 	"fmt"
@@ -366,7 +367,7 @@ func TestTrailingCRs(t *testing.T) {
 
 		r := NewReader(strings.NewReader(input))
 
-		out, err := r.ReadAll()
+		out, err := r.ReadAll(context.TODO())
 		if err != nil {
 			t.Errorf("TestTrailingCR() error:%v", err)
 		}
