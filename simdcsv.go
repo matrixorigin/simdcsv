@@ -258,15 +258,6 @@ func (r *Reader) readAllStreaming(ctx context.Context) (out chan recordsOutput) 
 			}
 			if quit {
 				fmt.Println("----quit readAllStreaming1")
-				r.onceCloseBufChan.Do(func() {
-					fmt.Println("----close bufchan3")
-					if r.bufchan != nil {
-						fmt.Println("----close bufchan4")
-						close(r.bufchan)
-						r.bufchan = nil
-					}
-				})
-				fmt.Println("----quit readAllStreaming2")
 				break
 			}
 
@@ -682,27 +673,27 @@ func (r *Reader) Close() {
 	if r.cancel != nil {
 		r.cancel()
 	}
-	r.onceCloseBufChan.Do(func() {
-		if r.bufchan != nil {
-			<-r.bufchan
-			close(r.bufchan)
-			r.bufchan = nil
-		}
-	})
-	r.onceCloseChunks.Do(func() {
-		if r.chunks != nil {
-			<-r.chunks
-			close(r.chunks)
-			r.chunks = nil
-		}
-	})
-	r.onceCloseOut.Do(func() {
-		if r.out != nil {
-			<-r.out
-			close(r.out)
-			r.out = nil
-		}
-	})
+	//r.onceCloseBufChan.Do(func() {
+	//	if r.bufchan != nil {
+	//		<-r.bufchan
+	//		close(r.bufchan)
+	//		r.bufchan = nil
+	//	}
+	//})
+	//r.onceCloseChunks.Do(func() {
+	//	if r.chunks != nil {
+	//		<-r.chunks
+	//		close(r.chunks)
+	//		r.chunks = nil
+	//	}
+	//})
+	//r.onceCloseOut.Do(func() {
+	//	if r.out != nil {
+	//		<-r.out
+	//		close(r.out)
+	//		r.out = nil
+	//	}
+	//})
 }
 
 func filterOutComments(records *[][]string, comment byte) {
