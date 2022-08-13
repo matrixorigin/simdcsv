@@ -227,6 +227,7 @@ func (r *Reader) readAllStreaming(ctx context.Context) (out chan recordsOutput) 
 		}()
 		defer r.onceCloseBufChan.Do(func() {
 			if r.bufchan != nil {
+				fmt.Println("----close bufchan")
 				close(r.bufchan)
 				r.bufchan = nil
 			}
