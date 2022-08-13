@@ -163,7 +163,7 @@ func (r *Reader) readAllStreaming(ctx context.Context) (out chan recordsOutput) 
 		if er := recover(); er != nil {
 			//fmt.Printf("%v\n",er)
 		}
-		//fmt.Printf("----- readAllStreaming exit in recover\n")
+		fmt.Printf("----- readAllStreaming exit in recover\n")
 	}()
 	out = make(chan recordsOutput, 20)
 	r.out = out
@@ -223,11 +223,12 @@ func (r *Reader) readAllStreaming(ctx context.Context) (out chan recordsOutput) 
 			if er := recover(); er != nil {
 				//fmt.Printf("%v\n",er)
 			}
-			//fmt.Printf("----- read file exit in recover\n")
+			fmt.Printf("----- read file exit in recover\n")
 		}()
 		defer r.onceCloseBufChan.Do(func() {
+			fmt.Println("----close bufchan1")
 			if r.bufchan != nil {
-				fmt.Println("----close bufchan")
+				fmt.Println("----close bufchan2")
 				close(r.bufchan)
 				r.bufchan = nil
 			}
@@ -256,7 +257,9 @@ func (r *Reader) readAllStreaming(ctx context.Context) (out chan recordsOutput) 
 			default:
 			}
 			if quit {
-				bufchan <- chunkIn{chunk, true}
+				fmt.Println("----quit readAllStreaming1")
+				bufchan <- chunkIn{[]byte{}, true}
+				fmt.Println("----quit readAllStreaming2")
 				break
 			}
 
@@ -313,7 +316,7 @@ func (r *Reader) stage1Streaming(bufchan chan chunkIn, chunkSize int, masksSize 
 		if er := recover(); er != nil {
 			//fmt.Printf("%v\n",er)
 		}
-		//fmt.Printf("----- stage1Streaming exit in recover\n")
+		fmt.Printf("----- stage1Streaming exit in recover\n")
 	}()
 	defer r.onceCloseChunks.Do(func() {
 		if chunks != nil {
@@ -389,7 +392,7 @@ func (r *Reader) stage2Streaming(chunks chan chunkInfo, wg *sync.WaitGroup, fiel
 		if er := recover(); er != nil {
 			//fmt.Printf("%v\n",er)
 		}
-		//fmt.Printf("----- stage2Streaming exit in recover\n")
+		fmt.Printf("----- stage2Streaming exit in recover\n")
 	}()
 	defer wg.Done()
 
