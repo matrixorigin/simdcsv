@@ -258,7 +258,6 @@ func (r *Reader) readAllStreaming(ctx context.Context) (out chan recordsOutput) 
 			}
 			if quit {
 				fmt.Println("----quit readAllStreaming1")
-				bufchan <- chunkIn{[]byte{}, true}
 				r.onceCloseBufChan.Do(func() {
 					fmt.Println("----close bufchan3")
 					if r.bufchan != nil {
