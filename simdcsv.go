@@ -252,11 +252,19 @@ func (r *Reader) readAllStreaming(ctx context.Context) (out chan recordsOutput) 
 			quit := false
 			select {
 			case <-ctx.Done():
-				fmt.Println("----readAllStreaming")
+				fmt.Println("----cancel readAllStreaming")
 				quit = true
 			default:
 			}
 			if quit {
+				r.onceCloseBufChan.Do(func() {
+					fmt.Println("----close bufchan3")
+					if r.bufchan != nil {
+						fmt.Println("----close bufchan4")
+						close(r.bufchan)
+						r.bufchan = nil
+					}
+				})
 				fmt.Println("----quit readAllStreaming1")
 				break
 			}
@@ -564,7 +572,7 @@ func (r *Reader) ReadLoop(inputCtx context.Context, lineOutChan chan LineOut) (e
 		if er := recover(); er != nil {
 			err = fmt.Errorf("%v\n", er)
 		}
-		//fmt.Printf("----- read loop exit in recover\n")
+		fmt.Printf("----- read loop exit in recover\n")
 	}()
 	quit := false
 	r.Begin = time.Now()

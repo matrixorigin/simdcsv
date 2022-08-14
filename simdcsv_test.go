@@ -25,10 +25,13 @@ import (
 	"io/ioutil"
 	"log"
 	"math/bits"
+	"os"
 	"reflect"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 	"unicode/utf8"
 )
 
@@ -895,4 +898,54 @@ func benchmarkEncodingCsv(b *testing.B, file string) {
 			log.Fatalf("%v", err)
 		}
 	}
+}
+
+func TestReader_Close(t *testing.T) {
+	fname := "/Users/pengzhen/Documents/GitHub/mo-test/ssb/lineorder_flat_1000w.csv"
+	f, err := os.Open(fname)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	reader := NewReaderWithOptions(f, ',', '#', false, false)
+	wg := sync.WaitGroup{}
+	ctx := context.TODO()
+	out := make(chan LineOut)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		err = reader.ReadLoop(ctx, out)
+		close(out)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			quit := false
+			select {
+			case _, status := <-out:
+				if !status {
+					quit = true
+				}
+			default:
+			}
+			if quit {
+				break
+			}
+			//			fmt.Println("process out")
+		}
+	}()
+
+	select {
+	case <-time.After(time.Second * 3):
+		fmt.Println("timeout close")
+		reader.Close()
+	}
+	fmt.Println("xxxxx")
+	wg.Wait()
+	fmt.Println("yyyyy")
 }
