@@ -676,7 +676,7 @@ func (r *Reader) Close() {
 		if er := recover(); er != nil {
 			//fmt.Printf("%v\n",er)
 		}
-		//fmt.Printf("----- Close exit in recover\n")
+		fmt.Printf("----- Close exit in recover\n")
 	}()
 	if r.cancel != nil {
 		r.cancel()
