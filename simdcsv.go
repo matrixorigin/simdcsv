@@ -757,9 +757,9 @@ func (r *Reader) ReadLoop(inputCtx context.Context, lineOutChan chan LineOut) (e
 
 	//drain out channel
 
-	for _ = range out {
-		fmt.Println("----drain out")
-	}
+	//for _ = range out {
+	//	fmt.Println("----drain out")
+	//}
 
 	r.End = time.Since(r.Begin)
 	return nil
@@ -773,14 +773,15 @@ func (r *Reader) Close() {
 		fmt.Printf("----- Close exit in recover\n")
 	}()
 	//drain channels before close
-	//go func() {
-	//	for _ = range r.bufchan {
-	//	}
-	//	for _ = range r.chunks {
-	//	}
-	//	for _ = range r.out {
-	//	}
-	//}()
+	go func() {
+		for _ = range r.bufchan {
+			fmt.Println("drain bufchan")
+		}
+		for _ = range r.chunks {
+		}
+		for _ = range r.out {
+		}
+	}()
 }
 
 func filterOutComments(records *[][]string, comment byte) {
