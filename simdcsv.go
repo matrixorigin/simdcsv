@@ -571,9 +571,9 @@ func (r *Reader) ReadLoop(inputCtx context.Context, lineOutChan chan LineOut) (e
 		if er := recover(); er != nil {
 			err = fmt.Errorf("%v\n", er)
 		}
-		if lineOutChan != nil {
-			close(lineOutChan)
-		}
+		//if lineOutChan != nil {
+		//	close(lineOutChan)
+		//}
 		fmt.Printf("----- read loop exit in recover\n")
 	}()
 	quit := false
