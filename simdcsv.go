@@ -270,6 +270,7 @@ func (r *Reader) readAllStreaming(ctx context.Context) (out chan recordsOutput) 
 					last: true,
 					quit: true,
 				}
+				fmt.Println("----quit readAllStreaming********")
 				break
 			}
 
