@@ -261,6 +261,7 @@ func (r *Reader) readAllStreaming(ctx context.Context) (out chan recordsOutput) 
 				fmt.Println("----cancel readAllStreaming")
 				quit = true
 			default:
+				fmt.Println("----chunk default")
 			}
 			if quit {
 				fmt.Println("----quit readAllStreaming1")
@@ -277,13 +278,16 @@ func (r *Reader) readAllStreaming(ctx context.Context) (out chan recordsOutput) 
 				if n > 0 {
 					panic("last buffer should be empty")
 				}
+				fmt.Println("----chunk 1")
 				bufchan <- chunkIn{chunk, true, false}
 				break
 			} else if err != nil {
 				log.Printf("bufio.Read() encounterend error: %v", err)
+				fmt.Println("----chunk 2")
 				bufchan <- chunkIn{chunk, true, false}
 				break
 			} else {
+				fmt.Println("----chunk 3")
 				bufchan <- chunkIn{chunk, false, false}
 				chunk = chunkNext[:n]
 			}
