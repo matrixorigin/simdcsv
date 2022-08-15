@@ -226,12 +226,10 @@ func (r *Reader) readAllStreaming(ctx context.Context) (out chan recordsOutput) 
 			if er := recover(); er != nil {
 				//fmt.Printf("%v\n",er)
 			}
-			fmt.Printf("----- read file exit in recover\n")
+			//fmt.Printf("----- read file exit in recover\n")
 		}()
 		defer r.onceCloseBufChan.Do(func() {
-			fmt.Println("----close bufchan1")
 			if r.bufchan != nil {
-				fmt.Println("----close bufchan2")
 				close(r.bufchan)
 			}
 		})
@@ -250,42 +248,14 @@ func (r *Reader) readAllStreaming(ctx context.Context) (out chan recordsOutput) 
 		}
 
 		for {
-			fmt.Println("----chunk size")
 			chunkNext := make([]byte, chunkSize)
 			quit := false
 			select {
 			case <-ctx.Done():
-				fmt.Println("----cancel readAllStreaming")
 				quit = true
 			default:
-				fmt.Println("----chunk default")
 			}
 			if quit {
-				fmt.Println("----quit readAllStreaming1")
-				r.onceCloseBufChan.Do(func() {
-					fmt.Println("----close bufchan1")
-					if r.bufchan != nil {
-						fmt.Println("----close bufchan2")
-						close(r.bufchan)
-					}
-				})
-				//r.onceCloseChunks.Do(func() {
-				//	if r.chunks != nil {
-				//		close(r.chunks)
-				//		r.chunks = nil
-				//	}
-				//})
-				//r.onceCloseOut.Do(func() {
-				//	if out != nil {
-				//		close(out)
-				//		r.out = nil
-				//	}
-				//})
-				//bufchan <- chunkIn{
-				//	buf:  nil,
-				//	last: true,
-				//	quit: true,
-				//}
 				fmt.Println("----quit readAllStreaming********")
 				break
 			}
@@ -295,20 +265,14 @@ func (r *Reader) readAllStreaming(ctx context.Context) (out chan recordsOutput) 
 				if n > 0 {
 					panic("last buffer should be empty")
 				}
-				fmt.Println("----chunk 1")
 				bufchan <- chunkIn{chunk, true, false}
-				fmt.Println("----chunk 1-1")
 				break
 			} else if err != nil {
 				log.Printf("bufio.Read() encounterend error: %v", err)
-				fmt.Println("----chunk 2")
 				bufchan <- chunkIn{chunk, true, false}
-				fmt.Println("----chunk 2-2")
 				break
 			} else {
-				fmt.Println("----chunk 3")
 				bufchan <- chunkIn{chunk, false, false}
-				fmt.Println("----chunk 3-3")
 				chunk = chunkNext[:n]
 			}
 		}
@@ -362,18 +326,10 @@ func (r *Reader) stage1Streaming(ctx context.Context, bufchan chan chunkIn, chun
 	splitRow := make([]byte, 0, 256)
 
 	first := true
-	quit := false
 	var chunk chunkIn
 	for chunk = range bufchan {
-		//select {
-		//case <-ctx.Done():
-		//	fmt.Println("cancel stage1Streaming")
-		//	quit = true
-		//case chunk = <-bufchan:
-		//}
-		if quit || chunk.quit {
+		if chunk.quit {
 			chunks <- chunkInfo{quit: true}
-			fmt.Println("quit chunk")
 			break
 		}
 		//fmt.Println("chunk")
@@ -444,25 +400,13 @@ func (r *Reader) stage2Streaming(ctx context.Context, chunks chan chunkInfo, wg 
 	simdlines, rowsSize, columnsSize := 1024, 500, 50000
 
 	first := true
-	quit := false
 	var chunkInfo chunkInfo
 	//var status bool
 	for chunkInfo = range chunks {
-		//select {
-		//case <-ctx.Done():
-		//	fmt.Println("cancel stage2Streaming")
-		//	quit = true
-		//case chunkInfo, status = <-chunks:
-		//	if !status {
-		//		quit = true
-		//	}
-		//}
-		if quit || chunkInfo.quit {
-			fmt.Println("quit chunkinfo")
+		if chunkInfo.quit {
 			out <- recordsOutput{quit: true}
 			break
 		}
-		//fmt.Println("chunkinfo")
 		if first {
 			r.Stage2_first_chunkinfo[id] = time.Since(r.Begin)
 			first = false
@@ -581,20 +525,9 @@ func (r *Reader) ReadAll(ctx context.Context) ([][]string, error) {
 	records := make([][]string, 0)
 	hash := make(map[int][][]string)
 	sequence := 0
-	quit := false
 	var rcrds recordsOutput
-	//var status bool
 	for rcrds = range out {
-		fmt.Println("new record")
-		//select {
-		//case <-ctx.Done():
-		//	quit = true
-		//case rcrds, status = <-out:
-		//	if !status {
-		//		quit = true
-		//	}
-		//}
-		if quit || rcrds.quit {
+		if rcrds.quit {
 			break
 		}
 		if rcrds.err != nil {
@@ -691,19 +624,15 @@ func (r *Reader) ReadLoop(inputCtx context.Context, lineOutChan chan LineOut) (e
 	var rcrds recordsOutput
 	var status bool
 	for {
-		fmt.Println("----print records 1")
 		select {
 		case <-inputCtx.Done():
-			fmt.Println("----cancel readloop")
 			quit = true
 		case rcrds, status = <-out:
 			if !status {
 				quit = true
 			}
 		}
-		fmt.Println("----print records 2")
 		if quit || rcrds.quit {
-			fmt.Println("readloop quit")
 			break
 		}
 		if first {
@@ -751,12 +680,6 @@ func (r *Reader) ReadLoop(inputCtx context.Context, lineOutChan chan LineOut) (e
 		lineOutChan <- LineOut{nil, nil}
 	}
 
-	//drain out channel
-
-	//for _ = range out {
-	//	fmt.Println("----drain out")
-	//}
-
 	r.End = time.Since(r.Begin)
 	return nil
 }
@@ -771,7 +694,6 @@ func (r *Reader) Close() {
 	//drain channels before close
 	go func() {
 		for _ = range r.bufchan {
-			fmt.Println("drain bufchan")
 		}
 		for _ = range r.chunks {
 		}
