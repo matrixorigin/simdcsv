@@ -697,6 +697,7 @@ func (r *Reader) ReadLoop(inputCtx context.Context, lineOutChan chan LineOut) (e
 	var rcrds recordsOutput
 	var status bool
 	for {
+		fmt.Println("----print records 1")
 		select {
 		case <-inputCtx.Done():
 			fmt.Println("----cancel readloop")
@@ -706,6 +707,7 @@ func (r *Reader) ReadLoop(inputCtx context.Context, lineOutChan chan LineOut) (e
 				quit = true
 			}
 		}
+		fmt.Println("----print records 2")
 		if quit || rcrds.quit {
 			fmt.Println("readloop quit")
 			break
