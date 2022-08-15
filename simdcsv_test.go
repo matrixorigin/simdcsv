@@ -948,6 +948,10 @@ func TestReader_Close(t *testing.T) {
 		time.Sleep(time.Second * 2)
 		fmt.Println("timeout close")
 		reader.Close()
+		go func() {
+			for _ = range out {
+			}
+		}()
 		fmt.Println("timeout exit")
 	}
 	fmt.Println("xxxxx")
