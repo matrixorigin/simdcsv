@@ -910,11 +910,12 @@ func TestReader_Close(t *testing.T) {
 	reader := NewReaderWithOptions(f, ',', '#', false, false)
 	wg := sync.WaitGroup{}
 	ctx := context.TODO()
+	cancelCtx, cancelFunc := context.WithCancel(ctx)
 	out := make(chan LineOut)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		err = reader.ReadLoop(ctx, out)
+		err = reader.ReadLoop(cancelCtx, out)
 		close(out)
 		if err != nil {
 			t.Fatal(err)
@@ -934,18 +935,23 @@ func TestReader_Close(t *testing.T) {
 			default:
 			}
 			if quit {
+				fmt.Println("quit")
 				break
 			}
-			//			fmt.Println("process out")
 		}
 	}()
 
 	select {
 	case <-time.After(time.Second * 3):
+		fmt.Println("timeout cancel")
+		cancelFunc()
+		time.Sleep(time.Second * 2)
 		fmt.Println("timeout close")
 		reader.Close()
+		fmt.Println("timeout exit")
 	}
 	fmt.Println("xxxxx")
 	wg.Wait()
 	fmt.Println("yyyyy")
+	time.Sleep(5 * time.Second)
 }
