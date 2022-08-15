@@ -168,7 +168,7 @@ func (r *Reader) readAllStreaming(ctx context.Context) (out chan recordsOutput) 
 		if er := recover(); er != nil {
 			//fmt.Printf("%v\n",er)
 		}
-		fmt.Printf("----- readAllStreaming exit in recover\n")
+		//fmt.Printf("----- readAllStreaming exit in recover\n")
 	}()
 	out = make(chan recordsOutput, 20)
 	r.out = out
@@ -256,7 +256,7 @@ func (r *Reader) readAllStreaming(ctx context.Context) (out chan recordsOutput) 
 			default:
 			}
 			if quit {
-				fmt.Println("----quit readAllStreaming********")
+				//fmt.Println("----quit readAllStreaming********")
 				break
 			}
 
@@ -312,7 +312,7 @@ func (r *Reader) stage1Streaming(ctx context.Context, bufchan chan chunkIn, chun
 		if er := recover(); er != nil {
 			//fmt.Printf("%v\n",er)
 		}
-		fmt.Printf("----- stage1Streaming exit in recover\n")
+		//fmt.Printf("----- stage1Streaming exit in recover\n")
 	}()
 	defer r.onceCloseChunks.Do(func() {
 		if chunks != nil {
@@ -332,7 +332,6 @@ func (r *Reader) stage1Streaming(ctx context.Context, bufchan chan chunkIn, chun
 			chunks <- chunkInfo{quit: true}
 			break
 		}
-		//fmt.Println("chunk")
 		if first {
 			r.Stage1_first_chunk = time.Since(r.Begin)
 			first = false
@@ -393,7 +392,7 @@ func (r *Reader) stage2Streaming(ctx context.Context, chunks chan chunkInfo, wg 
 		if er := recover(); er != nil {
 			//fmt.Printf("%v\n",er)
 		}
-		fmt.Printf("----- stage2Streaming exit in recover\n")
+		//fmt.Printf("----- stage2Streaming exit in recover\n")
 	}()
 	defer wg.Done()
 
@@ -572,7 +571,7 @@ func (r *Reader) ReadLoop(inputCtx context.Context, lineOutChan chan LineOut) (e
 		if er := recover(); er != nil {
 			err = fmt.Errorf("%v\n", er)
 		}
-		fmt.Printf("----- read loop exit in recover\n")
+		//fmt.Printf("----- read loop exit in recover\n")
 	}()
 	quit := false
 	r.Begin = time.Now()
@@ -689,7 +688,7 @@ func (r *Reader) Close() {
 		if er := recover(); er != nil {
 			//fmt.Printf("%v\n",er)
 		}
-		fmt.Printf("----- Close exit in recover\n")
+		//fmt.Printf("----- Close exit in recover\n")
 	}()
 	//drain channels before close
 	go func() {
