@@ -226,7 +226,7 @@ func (r *Reader) readAllStreaming(ctx context.Context) (out chan recordsOutput) 
 			if er := recover(); er != nil {
 				//fmt.Printf("%v\n",er)
 			}
-			//fmt.Printf("----- read file exit in recover\n")
+			fmt.Printf("----- read file exit in recover\n")
 		}()
 		defer r.onceCloseBufChan.Do(func() {
 			if r.bufchan != nil {
@@ -312,7 +312,7 @@ func (r *Reader) stage1Streaming(ctx context.Context, bufchan chan chunkIn, chun
 		if er := recover(); er != nil {
 			//fmt.Printf("%v\n",er)
 		}
-		//fmt.Printf("----- stage1Streaming exit in recover\n")
+		fmt.Printf("----- stage1Streaming exit in recover\n")
 	}()
 	defer r.onceCloseChunks.Do(func() {
 		if chunks != nil {
@@ -392,7 +392,7 @@ func (r *Reader) stage2Streaming(ctx context.Context, chunks chan chunkInfo, wg 
 		if er := recover(); er != nil {
 			//fmt.Printf("%v\n",er)
 		}
-		//fmt.Printf("----- stage2Streaming exit in recover\n")
+		fmt.Printf("----- stage2Streaming exit in recover\n")
 	}()
 	defer wg.Done()
 
@@ -571,7 +571,7 @@ func (r *Reader) ReadLoop(inputCtx context.Context, lineOutChan chan LineOut) (e
 		if er := recover(); er != nil {
 			err = fmt.Errorf("%v\n", er)
 		}
-		//fmt.Printf("----- read loop exit in recover\n")
+		fmt.Printf("----- read loop exit in recover\n")
 	}()
 	quit := false
 	r.Begin = time.Now()
@@ -676,6 +676,7 @@ func (r *Reader) ReadLoop(inputCtx context.Context, lineOutChan chan LineOut) (e
 		}
 	}
 	if lineOutChan != nil {
+		fmt.Println("-----send end")
 		lineOutChan <- LineOut{nil, nil}
 	}
 
