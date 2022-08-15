@@ -911,11 +911,16 @@ func TestReader_Close(t *testing.T) {
 	wg := sync.WaitGroup{}
 	ctx := context.TODO()
 	cancelCtx, cancelFunc := context.WithCancel(ctx)
-	out := make(chan LineOut)
+	//out := make(chan LineOut)
+	output := func(lineOut LineOut) error {
+		fmt.Println("111")
+		return nil
+	}
+
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		err = reader.ReadLoop(cancelCtx, out)
+		err = reader.ReadLoop(cancelCtx, nil, output)
 		fmt.Println("readloop exit")
 		if err != nil {
 			t.Fatal(err)
@@ -930,10 +935,10 @@ func TestReader_Close(t *testing.T) {
 			select {
 			case <-cancelCtx.Done():
 				quit = true
-			case _, status := <-out:
-				if !status {
-					quit = true
-				}
+			//case _, status := <-out:
+			//	if !status {
+			//		quit = true
+			//	}
 			default:
 			}
 			if quit {
@@ -952,15 +957,15 @@ func TestReader_Close(t *testing.T) {
 		fmt.Println("timeout close")
 		reader.Close()
 		go func() {
-			for _ = range out {
-				//fmt.Println("test drain out")
-			}
+			//for _ = range out {
+			//	//fmt.Println("test drain out")
+			//}
 		}()
 		fmt.Println("timeout exit")
 	}
 	fmt.Println("xxxxx")
 	wg.Wait()
-	close(out)
+	//close(out)
 	fmt.Println("yyyyy")
 	time.Sleep(5 * time.Second)
 }

@@ -105,6 +105,8 @@ type Reader struct {
 	End                    time.Duration
 }
 
+type OutputCallback func(LineOut) error
+
 var errInvalidDelim = errors.New("csv: invalid field or comment delimiter")
 
 func validDelim(r rune) bool {
@@ -566,7 +568,7 @@ func (r *Reader) ReadAll(ctx context.Context) ([][]string, error) {
 }
 
 // ReadLoop reads all the remaining records from r.
-func (r *Reader) ReadLoop(inputCtx context.Context, lineOutChan chan LineOut) (err error) {
+func (r *Reader) ReadLoop(inputCtx context.Context, lineOutChan chan LineOut, callback OutputCallback) (err error) {
 	defer func() {
 		if er := recover(); er != nil {
 			err = fmt.Errorf("%v\n", er)
@@ -602,6 +604,12 @@ func (r *Reader) ReadLoop(inputCtx context.Context, lineOutChan chan LineOut) (e
 				if lineOutChan != nil {
 					lineOutChan <- LineOut{nil, record}
 				}
+				if callback != nil {
+					err = callback(LineOut{nil, record})
+					if err != nil {
+						return err
+					}
+				}
 				return nil
 			}
 
@@ -611,6 +619,12 @@ func (r *Reader) ReadLoop(inputCtx context.Context, lineOutChan chan LineOut) (e
 
 			if lineOutChan != nil {
 				lineOutChan <- LineOut{nil, record}
+			}
+			if callback != nil {
+				err = callback(LineOut{nil, record})
+				if err != nil {
+					return err
+				}
 			}
 		}
 
@@ -660,6 +674,14 @@ func (r *Reader) ReadLoop(inputCtx context.Context, lineOutChan chan LineOut) (e
 				lineOutChan <- LineOut{nil, record}
 			}
 		}
+		if callback != nil {
+			for _, record := range rcrds.records {
+				err = callback(LineOut{nil, record})
+				if err != nil {
+					return err
+				}
+			}
+		}
 		sequence++
 
 		// check if we already received higher sequence numbers
@@ -668,6 +690,15 @@ func (r *Reader) ReadLoop(inputCtx context.Context, lineOutChan chan LineOut) (e
 				if lineOutChan != nil {
 					for _, record := range val {
 						lineOutChan <- LineOut{nil, record}
+					}
+				}
+
+				if callback != nil {
+					for _, record := range val {
+						err = callback(LineOut{nil, record})
+						if err != nil {
+							return err
+						}
 					}
 				}
 
@@ -682,6 +713,12 @@ func (r *Reader) ReadLoop(inputCtx context.Context, lineOutChan chan LineOut) (e
 		fmt.Println("-----send end")
 		lineOutChan <- LineOut{nil, nil}
 		fmt.Println("-----send end ------")
+	}
+	if callback != nil {
+		err = callback(LineOut{nil, nil})
+		if err != nil {
+			return err
+		}
 	}
 
 	r.End = time.Since(r.Begin)
