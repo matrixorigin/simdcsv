@@ -265,11 +265,31 @@ func (r *Reader) readAllStreaming(ctx context.Context) (out chan recordsOutput) 
 			}
 			if quit {
 				fmt.Println("----quit readAllStreaming1")
-				bufchan <- chunkIn{
-					buf:  nil,
-					last: true,
-					quit: true,
-				}
+				r.onceCloseBufChan.Do(func() {
+					fmt.Println("----close bufchan1")
+					if r.bufchan != nil {
+						fmt.Println("----close bufchan2")
+						close(r.bufchan)
+						r.bufchan = nil
+					}
+				})
+				//r.onceCloseChunks.Do(func() {
+				//	if r.chunks != nil {
+				//		close(r.chunks)
+				//		r.chunks = nil
+				//	}
+				//})
+				//r.onceCloseOut.Do(func() {
+				//	if out != nil {
+				//		close(out)
+				//		r.out = nil
+				//	}
+				//})
+				//bufchan <- chunkIn{
+				//	buf:  nil,
+				//	last: true,
+				//	quit: true,
+				//}
 				fmt.Println("----quit readAllStreaming********")
 				break
 			}
@@ -679,6 +699,7 @@ func (r *Reader) ReadLoop(inputCtx context.Context, lineOutChan chan LineOut) (e
 	for {
 		select {
 		case <-inputCtx.Done():
+			fmt.Println("----cancel readloop")
 			quit = true
 		case rcrds, status = <-out:
 			if !status {
@@ -735,11 +756,10 @@ func (r *Reader) ReadLoop(inputCtx context.Context, lineOutChan chan LineOut) (e
 	}
 
 	//drain out channel
-	go func() {
-		for _ = range out {
 
-		}
-	}()
+	for _ = range out {
+		fmt.Println("----drain out")
+	}
 
 	r.End = time.Since(r.Begin)
 	return nil
