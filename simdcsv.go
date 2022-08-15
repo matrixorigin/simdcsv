@@ -280,15 +280,18 @@ func (r *Reader) readAllStreaming(ctx context.Context) (out chan recordsOutput) 
 				}
 				fmt.Println("----chunk 1")
 				bufchan <- chunkIn{chunk, true, false}
+				fmt.Println("----chunk 1-1")
 				break
 			} else if err != nil {
 				log.Printf("bufio.Read() encounterend error: %v", err)
 				fmt.Println("----chunk 2")
 				bufchan <- chunkIn{chunk, true, false}
+				fmt.Println("----chunk 2-2")
 				break
 			} else {
 				fmt.Println("----chunk 3")
 				bufchan <- chunkIn{chunk, false, false}
+				fmt.Println("----chunk 3-3")
 				chunk = chunkNext[:n]
 			}
 		}
