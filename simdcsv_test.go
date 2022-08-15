@@ -916,7 +916,7 @@ func TestReader_Close(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		err = reader.ReadLoop(cancelCtx, out)
-		close(out)
+		fmt.Println("readloop exit")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -928,6 +928,8 @@ func TestReader_Close(t *testing.T) {
 		for {
 			quit := false
 			select {
+			case <-cancelCtx.Done():
+				quit = true
 			case _, status := <-out:
 				if !status {
 					quit = true
@@ -939,6 +941,7 @@ func TestReader_Close(t *testing.T) {
 				break
 			}
 		}
+		fmt.Println("will close out")
 	}()
 
 	select {
@@ -950,12 +953,14 @@ func TestReader_Close(t *testing.T) {
 		reader.Close()
 		go func() {
 			for _ = range out {
+				//fmt.Println("test drain out")
 			}
 		}()
 		fmt.Println("timeout exit")
 	}
 	fmt.Println("xxxxx")
 	wg.Wait()
+	close(out)
 	fmt.Println("yyyyy")
 	time.Sleep(5 * time.Second)
 }

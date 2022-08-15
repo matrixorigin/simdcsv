@@ -191,7 +191,6 @@ func (r *Reader) readAllStreaming(ctx context.Context) (out chan recordsOutput) 
 			r.onceCloseOut.Do(func() {
 				if out != nil {
 					close(out)
-					r.out = nil
 				}
 			})
 		}()
@@ -206,7 +205,6 @@ func (r *Reader) readAllStreaming(ctx context.Context) (out chan recordsOutput) 
 			r.onceCloseOut.Do(func() {
 				if out != nil {
 					close(out)
-					r.out = nil
 				}
 			})
 		}()
@@ -235,7 +233,6 @@ func (r *Reader) readAllStreaming(ctx context.Context) (out chan recordsOutput) 
 			if r.bufchan != nil {
 				fmt.Println("----close bufchan2")
 				close(r.bufchan)
-				r.bufchan = nil
 			}
 		})
 
@@ -270,7 +267,6 @@ func (r *Reader) readAllStreaming(ctx context.Context) (out chan recordsOutput) 
 					if r.bufchan != nil {
 						fmt.Println("----close bufchan2")
 						close(r.bufchan)
-						r.bufchan = nil
 					}
 				})
 				//r.onceCloseChunks.Do(func() {
@@ -340,7 +336,6 @@ func (r *Reader) readAllStreaming(ctx context.Context) (out chan recordsOutput) 
 		r.onceCloseOut.Do(func() {
 			if out != nil {
 				close(out)
-				r.out = nil
 			}
 		})
 	}()
@@ -358,7 +353,6 @@ func (r *Reader) stage1Streaming(ctx context.Context, bufchan chan chunkIn, chun
 	defer r.onceCloseChunks.Do(func() {
 		if chunks != nil {
 			close(chunks)
-			r.chunks = nil
 		}
 	})
 
