@@ -253,6 +253,7 @@ func (r *Reader) readAllStreaming(ctx context.Context) (out chan recordsOutput) 
 		}
 
 		for {
+			fmt.Println("----chunk size")
 			chunkNext := make([]byte, chunkSize)
 			quit := false
 			select {
