@@ -678,6 +678,7 @@ func (r *Reader) ReadLoop(inputCtx context.Context, lineOutChan chan LineOut) (e
 	if lineOutChan != nil {
 		fmt.Println("-----send end")
 		lineOutChan <- LineOut{nil, nil}
+		fmt.Println("-----send end ------")
 	}
 
 	r.End = time.Since(r.Begin)
