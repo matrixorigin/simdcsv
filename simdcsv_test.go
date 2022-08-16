@@ -18,24 +18,26 @@ package simdcsv
 
 import (
 	"bytes"
+	"context"
 	"encoding/csv"
 	"encoding/hex"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"math/bits"
+	"os"
 	"reflect"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 	"unicode/utf8"
 )
 
-//
 // Below are the test cases from `encoding/csv`.
 //
 // They are copied directly from https://golang.org/src/encoding/csv/reader_test.go
-//
 func TestRead(t *testing.T) {
 	tests := []struct {
 		Name   string
@@ -431,12 +433,14 @@ x,,,
 
 			out := [][]string{}
 			var err error
-			out, err = r.ReadAll()
+			out, err = r.ReadAll(context.TODO())
+			r.Close()
 			if !reflect.DeepEqual(err, tt.Error) {
 				t.Errorf("ReadAll() error:\ngot  %#v\nwant %#v", err, tt.Error)
 			} else if !reflect.DeepEqual(out, tt.Output) {
 				t.Errorf("ReadAll() output:\ngot  %q\nwant %q", out, tt.Output)
 			}
+
 		})
 	}
 }
@@ -558,7 +562,7 @@ func compareAgainstEncodingCsv(t *testing.T, test []byte, sep rune) {
 	}
 	r := NewReader(bytes.NewReader(test))
 	r.Comma = sep
-	simdrecords, err := r.ReadAll()
+	simdrecords, err := r.ReadAll(context.TODO())
 	if err != nil {
 		log.Fatalf("%v", err)
 	}
@@ -575,7 +579,7 @@ func testIgnoreCommentedLines(t *testing.T, csvData []byte) {
 
 	simdr := NewReader(bytes.NewReader(csvData))
 	simdr.FieldsPerRecord = -1
-	simdrecords, err := simdr.ReadAll()
+	simdrecords, err := simdr.ReadAll(context.TODO())
 	if err != nil {
 		log.Fatalf("%v", err)
 	}
@@ -612,7 +616,7 @@ func testFieldsPerRecord(t *testing.T, csvData []byte, fieldsPerRecord int64) {
 
 	simdr := NewReader(bytes.NewReader(csvData))
 	simdr.FieldsPerRecord = int(fieldsPerRecord)
-	simdrecords, errSimd := simdr.ReadAll()
+	simdrecords, errSimd := simdr.ReadAll(context.TODO())
 
 	r := csv.NewReader(bytes.NewReader(csvData))
 	r.FieldsPerRecord = int(fieldsPerRecord)
@@ -650,7 +654,7 @@ func TestEnsureFieldsPerRecord(t *testing.T) {
 func testTrimLeadingSpace(t *testing.T, csvData []byte) {
 
 	simdr := NewReader(bytes.NewReader(csvData))
-	simdrecords, err := simdr.ReadAll()
+	simdrecords, err := simdr.ReadAll(context.TODO())
 	if err != nil {
 		log.Fatalf("%v", err)
 	}
@@ -857,7 +861,7 @@ func benchmarkSimdCsv(b *testing.B, file string) {
 
 	for i := 0; i < b.N; i++ {
 		r := NewReader(bytes.NewReader(buf))
-		_, err := r.ReadAll()
+		_, err := r.ReadAll(context.TODO())
 		if err != nil {
 			log.Fatalf("%v", err)
 		}
@@ -894,4 +898,74 @@ func benchmarkEncodingCsv(b *testing.B, file string) {
 			log.Fatalf("%v", err)
 		}
 	}
+}
+
+func TestReader_Close(t *testing.T) {
+	fname := "/Users/pengzhen/Documents/GitHub/mo-test/ssb/lineorder_flat_1000w.csv"
+	f, err := os.Open(fname)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	reader := NewReaderWithOptions(f, ',', '#', false, false)
+	wg := sync.WaitGroup{}
+	ctx := context.TODO()
+	cancelCtx, cancelFunc := context.WithCancel(ctx)
+	//out := make(chan LineOut)
+	output := func(lineOut LineOut) error {
+		fmt.Println("111")
+		return nil
+	}
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		err = reader.ReadLoop(cancelCtx, nil, output)
+		fmt.Println("readloop exit")
+		if err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			quit := false
+			select {
+			case <-cancelCtx.Done():
+				quit = true
+			//case _, status := <-out:
+			//	if !status {
+			//		quit = true
+			//	}
+			default:
+			}
+			if quit {
+				fmt.Println("quit")
+				break
+			}
+		}
+		fmt.Println("will close out")
+	}()
+
+	select {
+	case <-time.After(time.Second * 3):
+		fmt.Println("timeout cancel")
+		cancelFunc()
+		time.Sleep(time.Second * 2)
+		fmt.Println("timeout close")
+		reader.Close()
+		go func() {
+			//for _ = range out {
+			//	//fmt.Println("test drain out")
+			//}
+		}()
+		fmt.Println("timeout exit")
+	}
+	fmt.Println("xxxxx")
+	wg.Wait()
+	//close(out)
+	fmt.Println("yyyyy")
+	time.Sleep(5 * time.Second)
 }

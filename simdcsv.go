@@ -19,6 +19,7 @@ package simdcsv
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/csv"
 	"errors"
 	"fmt"
@@ -83,23 +84,28 @@ type Reader struct {
 
 	//for close
 	onceCloseOut sync.Once
-	out chan recordsOutput
+	out          chan recordsOutput
+	outMu        sync.Mutex
 
 	onceCloseBufChan sync.Once
-	bufchan chan chunkIn
+	bufchan          chan chunkIn
+	bufchanMu        sync.Mutex
 
 	onceCloseChunks sync.Once
-	chunks chan chunkInfo
+	chunks          chan chunkInfo
+	chunksMu        sync.Mutex
 
 	//for debug
 	Begin                  time.Time
 	Stage1_first_chunk     time.Duration
-	Stage1_end time.Duration
+	Stage1_end             time.Duration
 	Stage2_first_chunkinfo [5]time.Duration
-	Stage2_end [5]time.Duration
+	Stage2_end             [5]time.Duration
 	ReadLoop_first_records time.Duration
 	End                    time.Duration
 }
+
+type OutputCallback func(LineOut) error
 
 var errInvalidDelim = errors.New("csv: invalid field or comment delimiter")
 
@@ -118,14 +124,14 @@ func NewReader(r io.Reader) *Reader {
 // NewReader returns a new Reader with options that reads from r.
 func NewReaderWithOptions(r io.Reader, cma, cmnt rune, lazyQt, tls bool) *Reader {
 	return &Reader{
-		Comma: cma,
-		Comment: cmnt,
-		FieldsPerRecord: -1,
-		LazyQuotes: lazyQt,
+		Comma:            cma,
+		Comment:          cmnt,
+		FieldsPerRecord:  -1,
+		LazyQuotes:       lazyQt,
 		TrimLeadingSpace: tls,
-		ReuseRecord: false,
-		TrailingComma: false,
-		r:     bufio.NewReader(r),
+		ReuseRecord:      false,
+		TrailingComma:    false,
+		r:                bufio.NewReader(r),
 	}
 }
 
@@ -137,17 +143,20 @@ type chunkInfo struct {
 	header   uint64
 	trailer  uint64
 	splitRow []byte
+	quit     bool
 }
 
 type recordsOutput struct {
 	sequence int
 	records  [][]string
 	err      error
+	quit     bool
 }
 
 type chunkIn struct {
 	buf  []byte
 	last bool
+	quit bool
 }
 
 type LineOut struct {
@@ -156,9 +165,9 @@ type LineOut struct {
 }
 
 // readAllStreaming reads all the remaining records from r.
-func (r *Reader) readAllStreaming() (out chan recordsOutput) {
+func (r *Reader) readAllStreaming(ctx context.Context) (out chan recordsOutput) {
 	defer func() {
-		if er := recover(); er != nil{
+		if er := recover(); er != nil {
 			//fmt.Printf("%v\n",er)
 		}
 		//fmt.Printf("----- readAllStreaming exit in recover\n")
@@ -175,16 +184,15 @@ func (r *Reader) readAllStreaming() (out chan recordsOutput) {
 		rCsv.FieldsPerRecord = r.FieldsPerRecord
 		rCsv.ReuseRecord = r.ReuseRecord
 		rcds, err := rCsv.ReadAll()
-		return recordsOutput{-1, rcds, err}
+		return recordsOutput{-1, rcds, err, false}
 	}
 
 	if r.Comma == r.Comment || !validDelim(r.Comma) || (r.Comment != 0 && !validDelim(r.Comment)) {
 		go func() {
-			out <- recordsOutput{-1, nil, errInvalidDelim}
+			out <- recordsOutput{-1, nil, errInvalidDelim, false}
 			r.onceCloseOut.Do(func() {
 				if out != nil {
 					close(out)
-					r.out = nil
 				}
 			})
 		}()
@@ -199,7 +207,6 @@ func (r *Reader) readAllStreaming() (out chan recordsOutput) {
 			r.onceCloseOut.Do(func() {
 				if out != nil {
 					close(out)
-					r.out = nil
 				}
 			})
 		}()
@@ -218,15 +225,14 @@ func (r *Reader) readAllStreaming() (out chan recordsOutput) {
 
 	go func() {
 		defer func() {
-			if er := recover(); er != nil{
+			if er := recover(); er != nil {
 				//fmt.Printf("%v\n",er)
 			}
-			//fmt.Printf("----- read file exit in recover\n")
+			fmt.Printf("----- read file exit in recover\n")
 		}()
 		defer r.onceCloseBufChan.Do(func() {
 			if r.bufchan != nil {
 				close(r.bufchan)
-				r.bufchan = nil
 			}
 		})
 
@@ -245,20 +251,30 @@ func (r *Reader) readAllStreaming() (out chan recordsOutput) {
 
 		for {
 			chunkNext := make([]byte, chunkSize)
+			quit := false
+			select {
+			case <-ctx.Done():
+				quit = true
+			default:
+			}
+			if quit {
+				//fmt.Println("----quit readAllStreaming********")
+				break
+			}
 
 			n, err := br.Read(chunkNext)
 			if err == io.EOF {
 				if n > 0 {
 					panic("last buffer should be empty")
 				}
-				bufchan <- chunkIn{chunk, true}
+				bufchan <- chunkIn{chunk, true, false}
 				break
 			} else if err != nil {
 				log.Printf("bufio.Read() encounterend error: %v", err)
-				bufchan <- chunkIn{chunk, true}
+				bufchan <- chunkIn{chunk, true, false}
 				break
 			} else {
-				bufchan <- chunkIn{chunk, false}
+				bufchan <- chunkIn{chunk, false, false}
 				chunk = chunkNext[:n]
 			}
 		}
@@ -268,7 +284,7 @@ func (r *Reader) readAllStreaming() (out chan recordsOutput) {
 	chunks := make(chan chunkInfo, cap(out))
 	r.chunks = chunks
 
-	go r.stage1Streaming(bufchan, chunkSize, masksSize, chunks)
+	go r.stage1Streaming(ctx, bufchan, chunkSize, masksSize, chunks)
 
 	go func() {
 		var wg sync.WaitGroup
@@ -279,14 +295,13 @@ func (r *Reader) readAllStreaming() (out chan recordsOutput) {
 		fieldsPerRecord := int64(r.FieldsPerRecord)
 
 		for parallel := 0; parallel < cores; parallel++ {
-			go r.stage2Streaming(chunks, &wg, &fieldsPerRecord, fallback, out, parallel)
+			go r.stage2Streaming(ctx, chunks, &wg, &fieldsPerRecord, fallback, out, parallel)
 		}
 
 		wg.Wait()
 		r.onceCloseOut.Do(func() {
 			if out != nil {
 				close(out)
-				r.out = nil
 			}
 		})
 	}()
@@ -294,17 +309,16 @@ func (r *Reader) readAllStreaming() (out chan recordsOutput) {
 	return
 }
 
-func (r *Reader) stage1Streaming(bufchan chan chunkIn, chunkSize int, masksSize int, chunks chan chunkInfo) {
+func (r *Reader) stage1Streaming(ctx context.Context, bufchan chan chunkIn, chunkSize int, masksSize int, chunks chan chunkInfo) {
 	defer func() {
-		if er := recover(); er != nil{
+		if er := recover(); er != nil {
 			//fmt.Printf("%v\n",er)
 		}
-		//fmt.Printf("----- stage1Streaming exit in recover\n")
+		fmt.Printf("----- stage1Streaming exit in recover\n")
 	}()
 	defer r.onceCloseChunks.Do(func() {
 		if chunks != nil {
 			close(chunks)
-			r.chunks = nil
 		}
 	})
 
@@ -314,8 +328,12 @@ func (r *Reader) stage1Streaming(bufchan chan chunkIn, chunkSize int, masksSize 
 	splitRow := make([]byte, 0, 256)
 
 	first := true
-
-	for chunk := range bufchan {
+	var chunk chunkIn
+	for chunk = range bufchan {
+		if chunk.quit {
+			chunks <- chunkInfo{quit: true}
+			break
+		}
 		if first {
 			r.Stage1_first_chunk = time.Since(r.Begin)
 			first = false
@@ -358,9 +376,9 @@ func (r *Reader) stage1Streaming(bufchan chan chunkIn, chunkSize int, masksSize 
 		splitRow = append(splitRow, chunk.buf[:header]...)
 
 		if header < uint64(len(chunk.buf)) {
-			chunks <- chunkInfo{sequence, chunk.buf, masksStream, postProcStream, header, trailer, splitRow}
+			chunks <- chunkInfo{sequence, chunk.buf, masksStream, postProcStream, header, trailer, splitRow, false}
 		} else {
-			chunks <- chunkInfo{sequence, nil, nil, nil, 0, 0, splitRow}
+			chunks <- chunkInfo{sequence, nil, nil, nil, 0, 0, splitRow, false}
 		}
 
 		splitRow = make([]byte, 0, len(splitRow)*3/2)
@@ -371,20 +389,25 @@ func (r *Reader) stage1Streaming(bufchan chan chunkIn, chunkSize int, masksSize 
 	r.Stage1_end = time.Since(r.Begin)
 }
 
-func (r *Reader) stage2Streaming(chunks chan chunkInfo, wg *sync.WaitGroup, fieldsPerRecord *int64, fallback func(ioReader io.Reader) recordsOutput, out chan recordsOutput, id int) {
+func (r *Reader) stage2Streaming(ctx context.Context, chunks chan chunkInfo, wg *sync.WaitGroup, fieldsPerRecord *int64, fallback func(ioReader io.Reader) recordsOutput, out chan recordsOutput, id int) {
 	defer func() {
-		if er := recover(); er != nil{
+		if er := recover(); er != nil {
 			//fmt.Printf("%v\n",er)
 		}
-		//fmt.Printf("----- stage2Streaming exit in recover\n")
+		fmt.Printf("----- stage2Streaming exit in recover\n")
 	}()
 	defer wg.Done()
 
 	simdlines, rowsSize, columnsSize := 1024, 500, 50000
 
 	first := true
-
-	for chunkInfo := range chunks {
+	var chunkInfo chunkInfo
+	//var status bool
+	for chunkInfo = range chunks {
+		if chunkInfo.quit {
+			out <- recordsOutput{quit: true}
+			break
+		}
 		if first {
 			r.Stage2_first_chunkinfo[id] = time.Since(r.Begin)
 			first = false
@@ -399,7 +422,7 @@ func (r *Reader) stage2Streaming(chunks chan chunkInfo, wg *sync.WaitGroup, fiel
 		if len(chunkInfo.splitRow) > 0 { // first append the row split between chunks
 			records, err := encodingCsv(chunkInfo.splitRow, r.Comma)
 			if err != nil {
-				out <- recordsOutput{-1, nil, err}
+				out <- recordsOutput{-1, nil, err, false}
 				break
 			}
 			simdrecords = append(simdrecords, records...)
@@ -476,7 +499,7 @@ func (r *Reader) stage2Streaming(chunks chan chunkInfo, wg *sync.WaitGroup, fiel
 			columnsSize = cap(columns) * 3 / 4
 		}
 
-		out <- recordsOutput{chunkInfo.sequence, simdrecords, nil}
+		out <- recordsOutput{chunkInfo.sequence, simdrecords, nil, false}
 	}
 	r.Stage2_end[id] = time.Since(r.Begin)
 }
@@ -486,8 +509,7 @@ func (r *Reader) stage2Streaming(chunks chan chunkInfo, wg *sync.WaitGroup, fiel
 // A successful call returns err == nil, not err == io.EOF. Because ReadAll is
 // defined to read until EOF, it does not treat end of file as an error to be
 // reported.
-func (r *Reader) ReadAll() ([][]string, error) {
-
+func (r *Reader) ReadAll(ctx context.Context) ([][]string, error) {
 	if !SupportedCPU() {
 		rCsv := csv.NewReader(r.r)
 		rCsv.LazyQuotes = r.LazyQuotes
@@ -499,13 +521,16 @@ func (r *Reader) ReadAll() ([][]string, error) {
 		return rCsv.ReadAll()
 	}
 
-	out := r.readAllStreaming()
+	out := r.readAllStreaming(ctx)
 
 	records := make([][]string, 0)
 	hash := make(map[int][][]string)
 	sequence := 0
-
-	for rcrds := range out {
+	var rcrds recordsOutput
+	for rcrds = range out {
+		if rcrds.quit {
+			break
+		}
 		if rcrds.err != nil {
 			// upon encountering an error ...
 			for range out {
@@ -543,14 +568,17 @@ func (r *Reader) ReadAll() ([][]string, error) {
 }
 
 // ReadLoop reads all the remaining records from r.
-func (r *Reader) ReadLoop(lineOutChan chan LineOut) (err error) {
+func (r *Reader) ReadLoop(inputCtx context.Context, lineOutChan chan LineOut, callback OutputCallback) (err error) {
 	defer func() {
-		if er := recover(); er != nil{
-			err = fmt.Errorf("%v\n",er)
+		if er := recover(); er != nil {
+			err = fmt.Errorf("%v\n", er)
 		}
-		//fmt.Printf("----- read loop exit in recover\n")
+		//if lineOutChan != nil {
+		//	close(lineOutChan)
+		//}
+		fmt.Printf("----- read loop exit in recover\n")
 	}()
-
+	quit := false
 	r.Begin = time.Now()
 	if !SupportedCPU() {
 		rCsv := csv.NewReader(r.r)
@@ -563,10 +591,24 @@ func (r *Reader) ReadLoop(lineOutChan chan LineOut) (err error) {
 
 		//go csv reading loop
 		for {
+			select {
+			case <-inputCtx.Done():
+				quit = true
+			default:
+			}
+			if quit {
+				break
+			}
 			record, err := rCsv.Read()
 			if err == io.EOF {
 				if lineOutChan != nil {
 					lineOutChan <- LineOut{nil, record}
+				}
+				if callback != nil {
+					err = callback(LineOut{nil, record})
+					if err != nil {
+						return err
+					}
 				}
 				return nil
 			}
@@ -578,18 +620,37 @@ func (r *Reader) ReadLoop(lineOutChan chan LineOut) (err error) {
 			if lineOutChan != nil {
 				lineOutChan <- LineOut{nil, record}
 			}
+			if callback != nil {
+				err = callback(LineOut{nil, record})
+				if err != nil {
+					return err
+				}
+			}
 		}
 
 		return nil
 	}
 
-	out := r.readAllStreaming()
+	out := r.readAllStreaming(inputCtx)
 
 	hash := make(map[int][][]string)
 	sequence := 0
 
 	first := true
-	for rcrds := range out {
+	var rcrds recordsOutput
+	var status bool
+	for {
+		select {
+		case <-inputCtx.Done():
+			quit = true
+		case rcrds, status = <-out:
+			if !status {
+				quit = true
+			}
+		}
+		if quit || rcrds.quit {
+			break
+		}
 		if first {
 			r.ReadLoop_first_records = time.Since(r.Begin)
 			first = false
@@ -613,6 +674,14 @@ func (r *Reader) ReadLoop(lineOutChan chan LineOut) (err error) {
 				lineOutChan <- LineOut{nil, record}
 			}
 		}
+		if callback != nil {
+			for _, record := range rcrds.records {
+				err = callback(LineOut{nil, record})
+				if err != nil {
+					return err
+				}
+			}
+		}
 		sequence++
 
 		// check if we already received higher sequence numbers
@@ -624,6 +693,15 @@ func (r *Reader) ReadLoop(lineOutChan chan LineOut) (err error) {
 					}
 				}
 
+				if callback != nil {
+					for _, record := range val {
+						err = callback(LineOut{nil, record})
+						if err != nil {
+							return err
+						}
+					}
+				}
+
 				delete(hash, sequence)
 				sequence++
 			} else {
@@ -632,7 +710,15 @@ func (r *Reader) ReadLoop(lineOutChan chan LineOut) (err error) {
 		}
 	}
 	if lineOutChan != nil {
+		fmt.Println("-----send end")
 		lineOutChan <- LineOut{nil, nil}
+		fmt.Println("-----send end ------")
+	}
+	if callback != nil {
+		err = callback(LineOut{nil, nil})
+		if err != nil {
+			return err
+		}
 	}
 
 	r.End = time.Since(r.Begin)
@@ -641,29 +727,20 @@ func (r *Reader) ReadLoop(lineOutChan chan LineOut) (err error) {
 
 func (r *Reader) Close() {
 	defer func() {
-		if er := recover(); er != nil{
+		if er := recover(); er != nil {
 			//fmt.Printf("%v\n",er)
 		}
 		//fmt.Printf("----- Close exit in recover\n")
 	}()
-	r.onceCloseBufChan.Do(func() {
-		if r.bufchan != nil {
-			close(r.bufchan)
-			r.bufchan = nil
+	//drain channels before close
+	go func() {
+		for _ = range r.bufchan {
 		}
-	})
-	r.onceCloseChunks.Do(func() {
-		if r.chunks != nil{
-			close(r.chunks)
-			r.chunks = nil
+		for _ = range r.chunks {
 		}
-	})
-	r.onceCloseOut.Do(func() {
-		if r.out != nil {
-			close(r.out)
-			r.out = nil
+		for _ = range r.out {
 		}
-	})
+	}()
 }
 
 func filterOutComments(records *[][]string, comment byte) {
