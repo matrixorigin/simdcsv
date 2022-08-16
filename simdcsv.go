@@ -103,6 +103,12 @@ type Reader struct {
 	Stage2_end             [5]time.Duration
 	ReadLoop_first_records time.Duration
 	End                    time.Duration
+
+	//for ReadOneLine
+	first 				   bool
+	records 			   [][]string
+	hash 				   map[int][][]string
+	sequence			   int
 }
 
 type OutputCallback func(LineOut) error
@@ -502,6 +508,89 @@ func (r *Reader) stage2Streaming(ctx context.Context, chunks chan chunkInfo, wg 
 		out <- recordsOutput{chunkInfo.sequence, simdrecords, nil, false}
 	}
 	r.Stage2_end[id] = time.Since(r.Begin)
+}
+
+// Read reads len count records from r.
+// Each record is a slice of fields.
+// A successful call returns err == nil, not err == io.EOF. Because ReadAll is
+// defined to read until EOF, it does not treat end of file as an error to be
+// reported.
+func (r *Reader) Read(cnt int, ctx context.Context) ([][]string, error) {
+	if !SupportedCPU() {
+		rCsv := csv.NewReader(r.r)
+		rCsv.LazyQuotes = r.LazyQuotes
+		rCsv.TrimLeadingSpace = r.TrimLeadingSpace
+		rCsv.Comment = r.Comment
+		rCsv.Comma = r.Comma
+		rCsv.FieldsPerRecord = r.FieldsPerRecord
+		rCsv.ReuseRecord = r.ReuseRecord
+		records := make([][]string, 0)
+		for i := 0; i < cnt; i++ {
+			str, err := rCsv.Read()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				return nil, nil
+			}
+			records = append(records, str)
+		}
+		return records, nil
+	}
+
+	if !r.first {
+		r.readAllStreaming(ctx)
+		r.first = true
+		r.records = make([][]string, 0)
+		r.hash = make(map[int][][]string)
+		r.sequence = 0
+	}
+	if len(r.records) >= cnt {
+		ret := r.records[:cnt]
+		r.records = r.records[cnt:]
+		return ret, nil
+	}
+
+	for rcrds := range r.out {
+		if rcrds.err != nil {
+			// upon encountering an error ...
+			for range r.out {
+				// ... drain channel
+			}
+			return nil, rcrds.err
+		}
+
+		// check whether number is in sequence
+		if rcrds.sequence > r.sequence {
+			r.hash[rcrds.sequence] = rcrds.records
+			continue
+		}
+
+		r.records = append(r.records, rcrds.records...)
+		r.sequence++
+
+		// check if we already received higher sequence numbers
+		for {
+			if val, ok := r.hash[r.sequence]; ok {
+				r.records = append(r.records, val...)
+				delete(r.hash, r.sequence)
+				r.sequence++
+			} else {
+				break
+			}
+		}
+		if len(r.records) >= cnt {
+			ret := r.records[:cnt]
+			r.records = r.records[cnt:]
+			return ret, nil
+		}
+	}
+
+	if len(r.records) == 0 {
+		return nil, nil
+	} else {
+		return r.records, nil
+	}
 }
 
 // ReadAll reads all the remaining records from r.
