@@ -531,7 +531,7 @@ func (r *Reader) Read(cnt int, ctx context.Context) ([][]string, error) {
 				break
 			}
 			if err != nil {
-				return nil, nil
+				return nil, err
 			}
 			records = append(records, str)
 		}
