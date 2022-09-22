@@ -516,6 +516,7 @@ func (r *Reader) stage2Streaming(ctx context.Context, chunks chan chunkInfo, wg 
 // defined to read until EOF, it does not treat end of file as an error to be
 // reported.
 func (r *Reader) Read(cnt int, ctx context.Context) ([][]string, error) {
+	quit := false
 	if !SupportedCPU() {
 		rCsv := csv.NewReader(r.r)
 		rCsv.LazyQuotes = r.LazyQuotes
@@ -526,6 +527,14 @@ func (r *Reader) Read(cnt int, ctx context.Context) ([][]string, error) {
 		rCsv.ReuseRecord = r.ReuseRecord
 		records := make([][]string, 0)
 		for i := 0; i < cnt; i++ {
+		   select {
+		   case <-ctx.Done():
+			   quit = true
+		   default:
+		   }
+		   if quit {
+				return nil, nil
+		   }
 			str, err := rCsv.Read()
 			if err == io.EOF {
 				break
@@ -552,6 +561,15 @@ func (r *Reader) Read(cnt int, ctx context.Context) ([][]string, error) {
 	}
 
 	for rcrds := range r.out {
+	   select {
+	   case <-ctx.Done():
+		   quit = true
+	   default:
+	   }
+	   if quit || rcrds.quit {
+		   break
+	   }
+
 		if rcrds.err != nil {
 			// upon encountering an error ...
 			for range r.out {
