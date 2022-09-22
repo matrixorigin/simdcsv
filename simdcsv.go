@@ -567,7 +567,7 @@ func (r *Reader) Read(cnt int, ctx context.Context) ([][]string, error) {
 	   default:
 	   }
 	   if quit || rcrds.quit {
-		   break
+			return nil, nil
 	   }
 
 		if rcrds.err != nil {
