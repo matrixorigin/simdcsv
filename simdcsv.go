@@ -109,6 +109,7 @@ type Reader struct {
 	records 			   [][]string
 	hash 				   map[int][][]string
 	sequence			   int
+	rCsv 				   *csv.Reader
 }
 
 type OutputCallback func(LineOut) error
@@ -168,6 +169,20 @@ type chunkIn struct {
 type LineOut struct {
 	Lines [][]string
 	Line  []string
+}
+
+func ReadCountString(r *csv.Reader, cnt int, records [][]string) ([][]string, int, error) {
+	for i := 0; i < cnt; i++ {
+		record, err := r.Read()
+		if err == io.EOF {
+			return records, i, nil
+		}
+		if err != nil {
+			return nil, i, err
+		}
+		records[i] = record
+	}
+	return records, cnt, nil
 }
 
 // readAllStreaming reads all the remaining records from r.
@@ -515,7 +530,7 @@ func (r *Reader) stage2Streaming(ctx context.Context, chunks chan chunkInfo, wg 
 // A successful call returns err == nil, not err == io.EOF. Because ReadAll is
 // defined to read until EOF, it does not treat end of file as an error to be
 // reported.
-func (r *Reader) Read(cnt int, ctx context.Context) ([][]string, error) {
+func (r *Reader) Read(cnt int, ctx context.Context, records [][]string) ([][]string, int, error) {
 	quit := false
 	if !SupportedCPU() {
 		rCsv := csv.NewReader(r.r)
@@ -533,82 +548,35 @@ func (r *Reader) Read(cnt int, ctx context.Context) ([][]string, error) {
 		   default:
 		   }
 		   if quit {
-				return nil, nil
+				return nil, i, nil
 		   }
 			str, err := rCsv.Read()
 			if err == io.EOF {
 				break
 			}
 			if err != nil {
-				return nil, err
+				return nil, i, err
 			}
 			records = append(records, str)
 		}
-		return records, nil
+		return records, cnt, nil
 	}
 
 	if !r.first {
-		r.readAllStreaming(ctx)
 		r.first = true
-		r.records = make([][]string, 0)
-		r.hash = make(map[int][][]string)
-		r.sequence = 0
+		r.rCsv = csv.NewReader(r.r)
+		r.rCsv.LazyQuotes = r.LazyQuotes
+		r.rCsv.TrimLeadingSpace = r.TrimLeadingSpace
+		r.rCsv.Comment = r.Comment
+		r.rCsv.Comma = r.Comma
+		r.rCsv.FieldsPerRecord = r.FieldsPerRecord
+		r.rCsv.ReuseRecord = r.ReuseRecord
 	}
-	if len(r.records) >= cnt {
-		ret := r.records[:cnt]
-		r.records = r.records[cnt:]
-		return ret, nil
+	_, cnt2, err := ReadCountString(r.rCsv, cnt, records);
+	if err != nil {
+		return nil, cnt2, err
 	}
-
-	for rcrds := range r.out {
-	   select {
-	   case <-ctx.Done():
-		   quit = true
-	   default:
-	   }
-	   if quit || rcrds.quit {
-			return nil, nil
-	   }
-
-		if rcrds.err != nil {
-			// upon encountering an error ...
-			for range r.out {
-				// ... drain channel
-			}
-			return nil, rcrds.err
-		}
-
-		// check whether number is in sequence
-		if rcrds.sequence > r.sequence {
-			r.hash[rcrds.sequence] = rcrds.records
-			continue
-		}
-
-		r.records = append(r.records, rcrds.records...)
-		r.sequence++
-
-		// check if we already received higher sequence numbers
-		for {
-			if val, ok := r.hash[r.sequence]; ok {
-				r.records = append(r.records, val...)
-				delete(r.hash, r.sequence)
-				r.sequence++
-			} else {
-				break
-			}
-		}
-		if len(r.records) >= cnt {
-			ret := r.records[:cnt]
-			r.records = r.records[cnt:]
-			return ret, nil
-		}
-	}
-
-	if len(r.records) == 0 {
-		return nil, nil
-	} else {
-		return r.records, nil
-	}
+	return records, cnt2, nil
 }
 
 // ReadAll reads all the remaining records from r.
