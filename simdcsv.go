@@ -561,7 +561,7 @@ func (r *Reader) Read(cnt int, ctx context.Context, records [][]string) ([][]str
 		rCsv.Comma = r.Comma
 		rCsv.FieldsPerRecord = r.FieldsPerRecord
 		rCsv.ReuseRecord = r.ReuseRecord
-		records := make([][]string, cnt)
+		records := make([][]string, 0)
 		for i := 0; i < cnt; i++ {
 		   select {
 		   case <-ctx.Done():
