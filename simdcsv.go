@@ -185,6 +185,27 @@ func ReadCountString(r *csv.Reader, cnt int, records [][]string) ([][]string, in
 	return records, cnt, nil
 }
 
+func ReadCountStringLimitSize(r *csv.Reader, cnt int, size uint64, records [][]string) ([][]string, int, bool, error) {
+	var curBatchSize uint64 = 0
+	for i := 0; i < cnt; i++ {
+		record, err := r.Read()
+		if err == io.EOF {
+			return records, i, true, nil
+		}
+		if err != nil {
+			return nil, i, true, err
+		}
+		records[i] = record
+		for j := 0; j < len(record); j++ {
+			curBatchSize += uint64(len(record[j]))
+		}
+		if curBatchSize >= size {
+			return records, i + 1, false, nil
+		}
+	}
+	return records, cnt, false, nil
+}
+
 // readAllStreaming reads all the remaining records from r.
 func (r *Reader) readAllStreaming(ctx context.Context) (out chan recordsOutput) {
 	defer func() {
@@ -578,6 +599,70 @@ func (r *Reader) Read(cnt int, ctx context.Context, records [][]string) ([][]str
 		return nil, cnt2, err
 	}
 	return records, cnt2, nil
+}
+
+// Read reads len count records from r.
+// Each record is a slice of fields.
+// A successful call returns err == nil, not err == io.EOF. Because ReadAll is
+// defined to read until EOF, it does not treat end of file as an error to be
+// reported.
+func (r *Reader) ReadLimitSize(cnt int, ctx context.Context, size uint64, records [][]string) ([][]string, int, bool, error) {
+	quit := false
+	if !SupportedCPU() {
+		rCsv := csv.NewReader(r.r)
+		rCsv.LazyQuotes = r.LazyQuotes
+		rCsv.TrimLeadingSpace = r.TrimLeadingSpace
+		rCsv.Comment = r.Comment
+		rCsv.Comma = r.Comma
+		rCsv.FieldsPerRecord = r.FieldsPerRecord
+		rCsv.ReuseRecord = r.ReuseRecord
+		finish := false
+		var curBatchSize uint64 = 0
+		for i := 0; i < cnt; i++ {
+		   select {
+		   case <-ctx.Done():
+			   quit = true
+		   default:
+		   }
+		   if quit {
+				return nil, i, true, nil
+		   }
+			str, err := rCsv.Read()
+			if err == io.EOF {
+				cnt = i
+				finish = true
+				break
+			}
+			if err != nil {
+				return nil, i, true, err
+			}
+			records[i] = str
+			for j := 0; j < len(str); j++ {
+			   curBatchSize += uint64(len(str[j]))
+		   }
+			if curBatchSize >= size {
+				cnt = i + 1
+				break
+			}
+		}
+		return records, cnt, finish, nil
+	}
+
+	if !r.first {
+		r.first = true
+		r.rCsv = csv.NewReader(r.r)
+		r.rCsv.LazyQuotes = r.LazyQuotes
+		r.rCsv.TrimLeadingSpace = r.TrimLeadingSpace
+		r.rCsv.Comment = r.Comment
+		r.rCsv.Comma = r.Comma
+		r.rCsv.FieldsPerRecord = r.FieldsPerRecord
+		r.rCsv.ReuseRecord = r.ReuseRecord
+	}
+	_, cnt2, finish, err := ReadCountStringLimitSize(r.rCsv, cnt, size, records);
+	if err != nil {
+		return nil, cnt2, finish, err
+	}
+	return records, cnt2, finish, nil
 }
 
 // ReadAll reads all the remaining records from r.
