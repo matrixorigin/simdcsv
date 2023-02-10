@@ -185,9 +185,18 @@ func ReadCountString(r *csv.Reader, cnt int, records [][]string) ([][]string, in
 	return records, cnt, nil
 }
 
-func ReadCountStringLimitSize(r *csv.Reader, cnt int, size uint64, records [][]string) ([][]string, int, bool, error) {
+func ReadCountStringLimitSize(r *csv.Reader, ctx context.Context, cnt int, size uint64, records [][]string) ([][]string, int, bool, error) {
 	var curBatchSize uint64 = 0
+	quit := false
 	for i := 0; i < cnt; i++ {
+		select {
+		case <-ctx.Done():
+			quit = true
+		default:
+		}
+		if quit {
+			 return nil, i, true, nil
+		}
 		record, err := r.Read()
 		if err == io.EOF {
 			return records, i, true, nil
@@ -658,7 +667,7 @@ func (r *Reader) ReadLimitSize(cnt int, ctx context.Context, size uint64, record
 		r.rCsv.FieldsPerRecord = r.FieldsPerRecord
 		r.rCsv.ReuseRecord = r.ReuseRecord
 	}
-	_, cnt2, finish, err := ReadCountStringLimitSize(r.rCsv, cnt, size, records);
+	_, cnt2, finish, err := ReadCountStringLimitSize(r.rCsv, ctx, cnt, size, records);
 	if err != nil {
 		return nil, cnt2, finish, err
 	}
